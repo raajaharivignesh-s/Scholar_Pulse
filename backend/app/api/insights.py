@@ -126,8 +126,6 @@ def get_insights(project_id: int, user: User = Depends(get_current_user), db: Se
     # Basic thematic synthesis from paper metadata & titles
     paper_titles = [p.title for p in papers if p.title]
     overview = f"Synthesized findings across {len(papers)} papers in project '{project.name}'."
-    if project.research_question:
-        overview += f" Focused on: {project.research_question}"
 
     core_themes = [
         InsightTheme(
@@ -189,15 +187,6 @@ def get_reading_priority(project_id: int, user: User = Depends(get_current_user)
             reasons.append("Fully processed and indexed")
         elif paper.status == "PROCESSING":
             score += 10.0
-
-        # Title match bonus with project research question
-        if project.research_question and paper.title:
-            rq_words = set(project.research_question.lower().split())
-            t_words = set(paper.title.lower().split())
-            overlap = len(rq_words.intersection(t_words))
-            if overlap > 0:
-                score += min(20.0, overlap * 5.0)
-                reasons.append(f"High relevance to research question ({overlap} term match)")
 
         reason_str = ", ".join(reasons) if reasons else "Standard priority paper in project."
 

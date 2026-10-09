@@ -65,12 +65,6 @@ class Project(Base):
         nullable=False,
     )
 
-    research_question: Mapped[str] = mapped_column(
-        Text,
-        default="",
-        nullable=False,
-    )
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utcnow,

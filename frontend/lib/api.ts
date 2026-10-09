@@ -5,7 +5,6 @@ export type Project = {
   id: number;
   name: string;
   description: string;
-  research_question: string;
   created_at: string;
   updated_at: string;
 };
@@ -17,13 +16,21 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const t = localStorage.getItem("sp_token");
     if (t) h.set("Authorization", `Bearer ${t}`);
   }
-  const r = await fetch(`${API}${path}`, { ...options, headers: h });
+  let r: Response;
+  try {
+    r = await fetch(`${API}${path}`, { ...options, headers: h });
+  } catch (err) {
+    throw new Error("Unable to connect to server. Please check your connection.");
+  }
   const d = await r.json().catch(() => ({}));
   if (r.status === 401 && typeof window !== "undefined") {
     localStorage.removeItem("sp_token");
     localStorage.removeItem("sp_user");
   }
-  if (!r.ok) throw new Error(d.detail ?? "Request failed");
+  if (!r.ok) {
+    const detailMsg = typeof d.detail === "string" ? d.detail : d.message;
+    throw new Error(detailMsg || `Request failed with status ${r.status}`);
+  }
   return d as T;
 }
 
@@ -56,7 +63,7 @@ export async function getProjects() {
   return request<Project[]>("/api/projects");
 }
 
-export async function createProject(p: { name: string; description: string; research_question: string }) {
+export async function createProject(p: { name: string; description: string }) {
   return request<Project>("/api/projects", { method: "POST", body: JSON.stringify(p) });
 }
 

@@ -47,7 +47,7 @@ def setup_db():
     db.add(u1)
     db.add(u2)
     
-    p1 = Project(id=1, owner_id=u1.id, name="Test Project 1", research_question="AI benchmarks")
+    p1 = Project(id=1, owner_id=u1.id, name="Test Project 1")
     p2 = Project(id=2, owner_id=u2.id, name="Project 2 (Other User)")
     db.add(p1)
     db.add(p2)
