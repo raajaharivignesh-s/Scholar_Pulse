@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.dependencies import get_current_user
@@ -20,6 +20,18 @@ class SourceItem(BaseModel):
     year: Optional[int] = None
     snippet: str
     rrf_score: Optional[float] = 0.0
+
+    @field_validator('year', mode='before')
+    @classmethod
+    def parse_year(cls, v):
+        if v == "" or v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                return int(v)
+            except ValueError:
+                return None
+        return v
 
 class AskResponse(BaseModel):
     answer: str

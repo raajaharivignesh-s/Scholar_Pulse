@@ -18,17 +18,14 @@ class ResearchGraphState:
 def node_decompose_query(state: ResearchGraphState) -> ResearchGraphState:
     """
     Decomposes user query into targeted academic sub-questions.
+    (Optimized: Skip multi-query expansion to vastly improve agent response speed)
     """
     base = state.query.strip()
-    sub_q = [
-        base,
-        f"{base} methodology and experimental approach",
-        f"{base} key findings and comparative results"
-    ]
+    sub_q = [base]
     state.sub_queries = sub_q
     return state
 
-def node_retrieve_evidence(state: ResearchGraphState, db: Session, top_k_per_sub: int = 3) -> ResearchGraphState:
+def node_retrieve_evidence(state: ResearchGraphState, db: Session, top_k_per_sub: int = 5) -> ResearchGraphState:
     """
     Executes hybrid retrieval across sub-questions, deduplicates context passages, 
     and enriches with Paper title, authors, year, section, and page metadata.
