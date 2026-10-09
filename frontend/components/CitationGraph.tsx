@@ -292,4 +292,3 @@ export default function CitationGraph({ nodes, edges }: CitationGraphProps) {
     </div>
   );
 }
-}
