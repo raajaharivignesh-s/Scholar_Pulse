@@ -501,11 +501,15 @@ def get_citations(project_id: int, user: User = Depends(get_current_user), db: S
         in_degrees[e.target] = in_degrees.get(e.target, 0) + 1
         out_degrees[e.source] = out_degrees.get(e.source, 0) + 1
 
-    cx, cy, radius = 340.0, 205.0, 140.0
+    cx, cy, radius = 460.0, 245.0, 185.0
     nodes = []
     clusters = ["Foundational Roots", "Core Architecture", "Empirical Benchmarks", "Frontier Extensions"]
 
-    y_stagger_tiers = [120, 200, 280, 160, 240, 320]
+    # Group papers by publication year for collision-free vertical distribution
+    papers_by_year = {}
+    for p in sorted_papers:
+        pyear = p.year if (p.year and 1900 <= p.year <= 2030) else min_year
+        papers_by_year.setdefault(pyear, []).append(p)
 
     for idx, p in enumerate(sorted_papers):
         ratio = idx / max(1, n - 1)
@@ -527,19 +531,30 @@ def get_citations(project_id: int, user: User = Depends(get_current_user), db: S
         # Higher score for seminal anchor and highly cited nodes
         score = min(98, max(45, int(52 + (in_deg * 15) + (8 if idx == 0 else 0) - (idx * 2))))
 
-        # Radial / Orbital Coordinates
+        # Radial / Orbital Coordinates (Spacious circle in expanded canvas)
         angle = (2 * math.pi * idx / n) if n > 0 else 0
         rx = round(cx + radius * math.cos(angle), 1) if n > 1 else cx
         ry = round(cy + radius * math.sin(angle), 1) if n > 1 else cy
 
-        # Timeline Coordinates (Mapped left-to-right from min_year to max_year)
+        # Timeline Coordinates (Spacious horizontal timeline from 110 to 810)
+        pyear = p.year if (p.year and 1900 <= p.year <= 2030) else min_year
         if max_year > min_year:
-            pyear = p.year if (p.year and 1900 <= p.year <= 2030) else (min_year + idx * (max_year - min_year) / max(1, n - 1))
-            tx = round(80 + ((pyear - min_year) / (max_year - min_year)) * 520, 1)
+            tx = round(110 + ((pyear - min_year) / (max_year - min_year)) * 700, 1)
         else:
-            tx = round(80 + (idx / max(1, n - 1)) * 520, 1)
+            tx = 460.0
 
-        ty = y_stagger_tiers[idx % len(y_stagger_tiers)]
+        # Collision-free vertical positioning per year cohort
+        year_group = papers_by_year[pyear]
+        tier_idx = year_group.index(p)
+        count = len(year_group)
+        if count == 1:
+            ty = 245.0
+        elif count == 2:
+            ty = 160.0 if tier_idx == 0 else 330.0
+        elif count == 3:
+            ty = 135.0 if tier_idx == 0 else (245.0 if tier_idx == 1 else 355.0)
+        else:
+            ty = round(120.0 + tier_idx * (270.0 / max(1, count - 1)), 1)
 
         max_in_deg = max(in_degrees.values()) if in_degrees else 0
         role = "👑 Landmark Anchor" if (in_deg == max_in_deg and in_deg > 0) else default_role

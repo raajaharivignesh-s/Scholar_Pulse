@@ -256,7 +256,7 @@ export default function Projects() {
               >
                 <div>
                   <div className="workspace-project-header">
-                    <span className="workspace-project-tag">PROJECT #{p.id}</span>
+                    <span className="workspace-project-tag">PROJECT #{ps.length - ps.indexOf(p)}</span>
                     <span className="workspace-project-date">
                       {new Date(p.created_at || Date.now()).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
                     </span>

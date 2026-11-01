@@ -93,10 +93,37 @@ def extract_structured_pdf(file_path: str) -> Dict[str, Any]:
         doi = extract_doi(full_text[:4000]) or extract_doi(full_text)
         year = extract_year(first_page_text[:1500])
 
-        # Infer title and authors from first page lines
+        # Infer title and authors by ignoring journal headers/banners/copyright
+        HEADER_PATTERNS = re.compile(
+            r'(?:ISSN|ISBN|DOI|https?://|www\.|\barXiv\b|Volume|Issue|\bVol\b|\bNo\b|Â©|Copyright|International Journal|Journal of|Proceedings of|Conference|Page|pp\.|Unpublished working draft|Published as|Provided proper attribution|reproduce the tables)',
+            re.IGNORECASE
+        )
         first_lines = [line.strip() for line in first_page_text.split("\n") if line.strip()]
-        inferred_title = first_lines[0][:250] if first_lines else ""
-        inferred_authors = first_lines[1][:250] if len(first_lines) > 1 else ""
+        inferred_title = ""
+        inferred_authors = ""
+        idx = 0
+        while idx < min(len(first_lines), 15):
+            line = first_lines[idx]
+            if len(line) < 4 or HEADER_PATTERNS.search(line):
+                idx += 1
+                continue
+            # Found first valid title line
+            title_parts = [line]
+            idx += 1
+            # Check for title continuation
+            while idx < min(len(first_lines), 15) and len(title_parts) < 3:
+                next_line = first_lines[idx]
+                if HEADER_PATTERNS.search(next_line) or re.search(r'\b(?:University|College|Institute|Department|Prof|Dr\.|Student|Email|@|Faculty|Author|Engineer)\b', next_line, re.IGNORECASE):
+                    break
+                if len(title_parts[-1]) < 90 and not title_parts[-1].endswith(('.', ':', '?')):
+                    title_parts.append(next_line)
+                    idx += 1
+                else:
+                    break
+            inferred_title = " ".join(title_parts)[:300]
+            if idx < len(first_lines):
+                inferred_authors = first_lines[idx][:250]
+            break
 
         # Fast section blocks detection
         sections = []

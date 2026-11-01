@@ -3,6 +3,7 @@ from datetime import datetime
 from pydantic import BaseModel
 
 class PaperBase(BaseModel):
+    display_name: Optional[str] = None
     title: Optional[str] = None
     authors: Optional[str] = None
     year: Optional[int] = None

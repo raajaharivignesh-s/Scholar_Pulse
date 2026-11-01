@@ -24,6 +24,7 @@ export default function CitationGraph({
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [selectedCluster, setSelectedCluster] = useState<string>("ALL");
   const [activeBottomTab, setActiveBottomTab] = useState<"LEADERBOARD" | "READING_PATH" | "NETWORK_METRICS">("LEADERBOARD");
+  const [hoveredEdgeIdx, setHoveredEdgeIdx] = useState<number | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Map nodes for O(1) lookups
@@ -397,7 +398,7 @@ export default function CitationGraph({
             </span>
           </div>
           <div>
-            <span>💡 <em>Click any paper to isolate citation paths & inspect details</em></span>
+            <span>💡 <em>Click any paper to isolate citation paths • Hover connection lines for relationship details</em></span>
           </div>
         </div>
 
@@ -408,17 +409,17 @@ export default function CitationGraph({
             background: "radial-gradient(ellipse at center, rgba(14, 23, 42, 0.92) 0%, rgba(7, 11, 22, 0.98) 100%)",
             borderRadius: "14px",
             border: "1px solid var(--glass-border-glow)",
-            padding: "16px 12px 12px",
+            padding: "18px 14px 14px",
             position: "relative",
-            minHeight: "440px"
+            minHeight: "490px"
           }}
         >
           <svg
-            viewBox="0 0 720 440"
+            viewBox="0 0 920 490"
             style={{
               width: "100%",
               height: "auto",
-              maxHeight: "470px",
+              maxHeight: "520px",
               transform: `scale(${zoomLevel})`,
               transition: "transform 0.25s ease",
               userSelect: "none"
@@ -430,31 +431,25 @@ export default function CitationGraph({
                 <feComposite in="SourceGraphic" in2="blur" operator="over" />
               </filter>
               <filter id="arrowGlow" x="-50%" y="-50%" width="200%" height="200%">
-                <feGaussianBlur stdDeviation="3" result="blur" />
+                <feGaussianBlur stdDeviation="3.5" result="blur" />
                 <feComposite in="SourceGraphic" in2="blur" operator="over" />
               </filter>
-              <marker id="citationArrow" viewBox="0 0 10 10" refX="28" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#06B6D4" opacity="0.85" />
-              </marker>
-              <marker id="highlightArrow" viewBox="0 0 10 10" refX="32" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#10B981" />
-              </marker>
             </defs>
 
             {/* Timeline Horizontal Year Axis (Visible in Timeline Mode) */}
             {viewMode === "TIMELINE" && (
-              <g opacity="0.75">
+              <g opacity="0.8">
                 {/* Horizontal time line */}
-                <line x1="60" y1="54" x2="660" y2="54" stroke="rgba(255, 255, 255, 0.15)" strokeWidth="1.5" strokeDasharray="4 4" />
+                <line x1="80" y1="52" x2="840" y2="52" stroke="rgba(255, 255, 255, 0.15)" strokeWidth="1.5" strokeDasharray="4 4" />
                 
                 {/* Milestone Year Ticks & Guidelines */}
                 {yearTicks.map((yr, idx) => {
-                  const tickX = minYear === maxYear ? 360 : 80 + ((yr - minYear) / Math.max(1, maxYear - minYear)) * 520;
+                  const tickX = minYear === maxYear ? 460 : 110 + ((yr - minYear) / Math.max(1, maxYear - minYear)) * 700;
                   return (
                     <g key={idx}>
-                      <line x1={tickX} y1="46" x2={tickX} y2="62" stroke="#06B6D4" strokeWidth="2" />
-                      <line x1={tickX} y1="62" x2={tickX} y2="410" stroke="rgba(255, 255, 255, 0.04)" strokeDasharray="3 3" />
-                      <text x={tickX} y="38" fill="#06B6D4" fontSize="11" fontWeight="700" textAnchor="middle">
+                      <line x1={tickX} y1="44" x2={tickX} y2="60" stroke="#06B6D4" strokeWidth="2" />
+                      <line x1={tickX} y1="60" x2={tickX} y2="455" stroke="rgba(255, 255, 255, 0.04)" strokeDasharray="3 3" />
+                      <text x={tickX} y="36" fill="#06B6D4" fontSize="11" fontWeight="700" textAnchor="middle">
                         {yr}
                       </text>
                     </g>
@@ -469,48 +464,145 @@ export default function CitationGraph({
               const tgtNode = nodeMap.get(edge.target);
               if (!srcNode || !tgtNode) return null;
 
-              const sx = viewMode === "TIMELINE" ? (srcNode.timeline_x ?? srcNode.x ?? 100) : (srcNode.x ?? 300);
-              const sy = viewMode === "TIMELINE" ? (srcNode.timeline_y ?? srcNode.y ?? 200) : (srcNode.y ?? 200);
-              const tx = viewMode === "TIMELINE" ? (tgtNode.timeline_x ?? tgtNode.x ?? 600) : (tgtNode.x ?? 300);
-              const ty = viewMode === "TIMELINE" ? (tgtNode.timeline_y ?? tgtNode.y ?? 200) : (tgtNode.y ?? 200);
+              const srcRadius = getNodeRadius(srcNode);
+              const tgtRadius = getNodeRadius(tgtNode);
+
+              const sx0 = viewMode === "TIMELINE" ? (srcNode.timeline_x ?? srcNode.x ?? 110) : (srcNode.x ?? 460);
+              const sy0 = viewMode === "TIMELINE" ? (srcNode.timeline_y ?? srcNode.y ?? 245) : (srcNode.y ?? 245);
+              const tx0 = viewMode === "TIMELINE" ? (tgtNode.timeline_x ?? tgtNode.x ?? 810) : (tgtNode.x ?? 460);
+              const ty0 = viewMode === "TIMELINE" ? (tgtNode.timeline_y ?? tgtNode.y ?? 245) : (tgtNode.y ?? 245);
 
               const isFocus = selectedNodeId !== null || hoveredNodeId !== null;
               const focusId = selectedNodeId || hoveredNodeId;
               const isDirectlyConnected = edge.source === focusId || edge.target === focusId;
               const isDimmed = isFocus && !isDirectlyConnected;
 
-              // Curved bezier path for organic graph aesthetic
-              const dx = tx - sx;
-              const dy = ty - sy;
-              const cx1 = sx + dx * 0.45;
-              const cy1 = sy;
-              const cx2 = sx + dx * 0.55;
-              const cy2 = ty;
-              const pathData = `M ${sx} ${sy} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${tx} ${ty}`;
+              // Distance & direction vector between nodes
+              const dx = tx0 - sx0;
+              const dy = ty0 - sy0;
+
+              // Organic Bézier control points with fanned departures
+              let cx1: number, cy1: number, cx2: number, cy2: number;
+              if (viewMode === "TIMELINE") {
+                const curveCurvature = Math.max(45, Math.abs(dx) * 0.42);
+                // Fan out departure based on vertical direction to avoid bundle clutter
+                const fanOffset = dy * 0.22;
+                cx1 = sx0 + curveCurvature;
+                cy1 = sy0 + fanOffset;
+                cx2 = tx0 - curveCurvature;
+                cy2 = ty0 - dy * 0.08;
+              } else {
+                const midX = (sx0 + tx0) / 2;
+                const midY = (sy0 + ty0) / 2;
+                const perpX = -dy * 0.16;
+                const perpY = dx * 0.16;
+                cx1 = midX + perpX;
+                cy1 = midY + perpY;
+                cx2 = midX + perpX;
+                cy2 = midY + perpY;
+              }
+
+              // Calculate outgoing angle from source node perimeter
+              const uVx = cx1 - sx0;
+              const uVy = cy1 - sy0;
+              const uLen = Math.hypot(uVx, uVy) || 1;
+              const sx = sx0 + (srcRadius + 1.5) * (uVx / uLen);
+              const sy = sy0 + (srcRadius + 1.5) * (uVy / uLen);
+
+              // Calculate incoming angle toward target node perimeter
+              const vVx = tx0 - cx2;
+              const vVy = ty0 - cy2;
+              const vLen = Math.hypot(vVx, vVy) || 1;
+              const angleDeg = Math.atan2(vVy, vVx) * (180 / Math.PI);
+
+              // Terminate path and position arrowhead flush at target node perimeter
+              const tipX = tx0 - (tgtRadius + 1.5) * (vVx / vLen);
+              const tipY = ty0 - (tgtRadius + 1.5) * (vVy / vLen);
+
+              const pathData = `M ${sx} ${sy} C ${cx1} ${cy1}, ${cx2} ${cy2}, ${tipX} ${tipY}`;
+
+              // Position label dynamically at midpoint of curve
+              const labelT = 0.50;
+              const oneMinusT = 1 - labelT;
+              const lx =
+                Math.pow(oneMinusT, 3) * sx +
+                3 * Math.pow(oneMinusT, 2) * labelT * cx1 +
+                3 * oneMinusT * Math.pow(labelT, 2) * cx2 +
+                Math.pow(labelT, 3) * tipX;
+              const ly =
+                Math.pow(oneMinusT, 3) * sy +
+                3 * Math.pow(oneMinusT, 2) * labelT * cy1 +
+                3 * oneMinusT * Math.pow(labelT, 2) * cy2 +
+                Math.pow(labelT, 3) * tipY;
+
+              const isEdgeHovered = hoveredEdgeIdx === idx;
+              const isHighlighted = isDirectlyConnected || isEdgeHovered;
+              const edgeColor = isHighlighted ? "#10B981" : "rgba(99, 102, 241, 0.4)";
+              const arrowColor = isHighlighted ? "#10B981" : "#06B6D4";
+
+              const labelText = `${edge.label || "Citation"}${edge.context ? ` • ${edge.context}` : ""}`;
+              const badgeWidth = Math.max(76, labelText.length * 5.8 + 22);
 
               return (
-                <g key={idx} opacity={isDimmed ? 0.08 : isDirectlyConnected ? 1 : 0.45} style={{ transition: "opacity 0.25s ease" }}>
+                <g
+                  key={idx}
+                  opacity={isDimmed ? 0.08 : isHighlighted ? 1 : 0.4}
+                  style={{ transition: "opacity 0.2s ease", cursor: "pointer" }}
+                  onMouseEnter={() => setHoveredEdgeIdx(idx)}
+                  onMouseLeave={() => setHoveredEdgeIdx(null)}
+                >
+                  {/* Invisible wide hitbox for effortless cursor interaction */}
                   <path
                     d={pathData}
                     fill="none"
-                    stroke={isDirectlyConnected ? "#10B981" : "rgba(99, 102, 241, 0.45)"}
-                    strokeWidth={isDirectlyConnected ? "2.8" : "1.5"}
-                    strokeDasharray={isDirectlyConnected ? "none" : "3 3"}
-                    markerEnd={isDirectlyConnected ? "url(#highlightArrow)" : "url(#citationArrow)"}
-                    filter={isDirectlyConnected ? "url(#arrowGlow)" : undefined}
+                    stroke="transparent"
+                    strokeWidth="18"
                   />
-                  {isDirectlyConnected && (
-                    <text
-                      x={(sx + tx) / 2}
-                      y={(sy + ty) / 2 - 8}
-                      fill="#10B981"
-                      fontSize="9"
-                      fontWeight="700"
-                      textAnchor="middle"
-                      style={{ letterSpacing: "0.04em" }}
-                    >
-                      {edge.label}
-                    </text>
+
+                  {/* Visible Curved Connection Path */}
+                  <path
+                    d={pathData}
+                    fill="none"
+                    stroke={edgeColor}
+                    strokeWidth={isHighlighted ? "2.8" : "1.5"}
+                    strokeDasharray={isHighlighted ? "none" : "3 3"}
+                    filter={isHighlighted ? "url(#arrowGlow)" : undefined}
+                  />
+
+                  {/* High-Precision Direct Arrowhead */}
+                  <path
+                    d="M -9 -4.5 L 0 0 L -9 4.5 L -6.5 0 Z"
+                    fill={arrowColor}
+                    transform={`translate(${tipX}, ${tipY}) rotate(${angleDeg})`}
+                    filter={isHighlighted ? "url(#arrowGlow)" : undefined}
+                  />
+
+                  {/* Interactive Floating Hover Tooltip: Appears on hover */}
+                  {isEdgeHovered && (
+                    <g transform={`translate(${lx}, ${ly - 14})`} style={{ pointerEvents: "none" }}>
+                      <rect
+                        x={-badgeWidth / 2}
+                        y="-11"
+                        width={badgeWidth}
+                        height="22"
+                        rx="11"
+                        fill="rgba(11, 19, 43, 0.96)"
+                        stroke="#10B981"
+                        strokeWidth="1.2"
+                        filter="drop-shadow(0 4px 12px rgba(0,0,0,0.85))"
+                      />
+                      <text
+                        x="0"
+                        y="3.5"
+                        fill="#34D399"
+                        fontSize="9"
+                        fontWeight="700"
+                        textAnchor="middle"
+                        letterSpacing="0.03em"
+                      >
+                        {labelText}
+                      </text>
+                    </g>
                   )}
                 </g>
               );
@@ -518,8 +610,8 @@ export default function CitationGraph({
 
             {/* Paper Nodes */}
             {nodes.map((node) => {
-              const nx = viewMode === "TIMELINE" ? (node.timeline_x ?? node.x ?? 100) : (node.x ?? 300);
-              const ny = viewMode === "TIMELINE" ? (node.timeline_y ?? node.y ?? 200) : (node.y ?? 200);
+              const nx = viewMode === "TIMELINE" ? (node.timeline_x ?? node.x ?? 110) : (node.x ?? 460);
+              const ny = viewMode === "TIMELINE" ? (node.timeline_y ?? node.y ?? 245) : (node.y ?? 245);
 
               const isSelected = selectedNodeId === node.id;
               const isHovered = hoveredNodeId === node.id;
@@ -569,12 +661,9 @@ export default function CitationGraph({
                     </text>
                   )}
 
-                  {/* Node Center: Year & ID */}
-                  <text fill="#FFFFFF" fontSize="10" textAnchor="middle" dy="-2" fontWeight="800">
+                  {/* Node Center: Year */}
+                  <text fill="#FFFFFF" fontSize="11" textAnchor="middle" dy="4" fontWeight="800">
                     {node.year || "PDF"}
-                  </text>
-                  <text fill="rgba(255,255,255,0.6)" fontSize="8" textAnchor="middle" dy="10" fontWeight="600">
-                    #{node.id}
                   </text>
 
                   {/* Bottom Title Label */}
@@ -644,127 +733,46 @@ export default function CitationGraph({
           )}
         </div>
 
-        {/* Selected Paper Deep-Dive Inspector Drawer */}
+        {/* Selected Paper Minimal Card */}
         {selectedNode && (
           <div
             className="animate-fade-in"
             style={{
               marginTop: "20px",
-              padding: "22px 24px",
+              padding: "20px 24px",
               borderRadius: "14px",
               background: "rgba(6, 182, 212, 0.08)",
               border: "1px solid rgba(6, 182, 212, 0.35)",
               boxShadow: "0 8px 32px rgba(0,0,0,0.25)"
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px" }}>
-              <div>
-                <span className="badge-pill badge-cyan" style={{ marginRight: "8px" }}>
-                  SELECTED PAPER #{selectedNode.id}
-                </span>
-                <span
-                  style={{
-                    fontSize: "0.76rem",
-                    padding: "3px 10px",
-                    borderRadius: "12px",
-                    fontWeight: 700,
-                    background: `${getClusterColor(selectedNode.cluster)}20`,
-                    color: getClusterColor(selectedNode.cluster)
-                  }}
-                >
-                  {selectedNode.key_role} • {selectedNode.cluster}
-                </span>
-              </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+              <span className="badge-pill badge-cyan">
+                SELECTED PAPER
+              </span>
               <button
                 className="icon-button"
                 onClick={() => setSelectedNodeId(null)}
-                style={{ background: "rgba(255,255,255,0.06)", border: "none", color: "#fff", cursor: "pointer", padding: "4px 8px", borderRadius: "6px" }}
+                style={{ background: "rgba(255,255,255,0.06)", border: "none", color: "#fff", cursor: "pointer", padding: "4px 10px", borderRadius: "6px", fontSize: "0.82rem" }}
+                title="Close"
               >
                 ✕ Close
               </button>
             </div>
 
-            <h3 style={{ fontSize: "1.2rem", margin: "6px 0 8px", color: "#ffffff" }}>
+            <h3 style={{ fontSize: "1.18rem", margin: "0 0 16px 0", color: "#ffffff", lineHeight: "1.45", fontWeight: 700 }}>
               {selectedNode.title}
             </h3>
 
-            <div style={{ display: "flex", gap: "20px", flexWrap: "wrap", fontSize: "0.85rem", color: "var(--text-muted)", marginBottom: "14px" }}>
-              <span>👥 <strong>Authors:</strong> {selectedNode.authors || "Unknown"}</span>
-              <span>📅 <strong>Year:</strong> {selectedNode.year || "N/A"}</span>
-              {selectedNode.doi && (
-                <span>🔗 <strong>DOI:</strong> <a href={`https://doi.org/${selectedNode.doi}`} target="_blank" rel="noreferrer" style={{ color: "var(--accent-cyan)" }}>{selectedNode.doi}</a></span>
-              )}
-              <span>⚡ <strong>Influence Score:</strong> <strong style={{ color: "var(--accent-emerald)" }}>{selectedNode.influence_score}/100</strong></span>
-            </div>
-
-            {/* Direct Citation Lineage Chips */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px", marginTop: "12px", paddingTop: "12px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-              {/* Prior works this paper cites */}
-              <div>
-                <span style={{ fontSize: "0.78rem", color: "var(--accent-cyan)", fontWeight: 700, display: "block", marginBottom: "6px" }}>
-                  ⬅️ Prior Works / Baselines Cited ({citingThis.length}):
-                </span>
-                {citingThis.length > 0 ? (
-                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                    {citingThis.map((p) => (
-                      <span
-                        key={p.id}
-                        onClick={() => setSelectedNodeId(p.id)}
-                        className="badge-pill badge-cyan"
-                        style={{ cursor: "pointer", fontSize: "0.75rem" }}
-                      >
-                        #{p.id} ({p.year || "N/A"}): {p.title.slice(0, 22)}…
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="muted" style={{ fontSize: "0.78rem" }}>Foundational paper (no earlier baseline cited in project)</span>
-                )}
-              </div>
-
-              {/* Subsequent works citing this paper */}
-              <div>
-                <span style={{ fontSize: "0.78rem", color: "var(--accent-emerald)", fontWeight: 700, display: "block", marginBottom: "6px" }}>
-                  ➡️ Subsequent Works That Cite This ({citedByThis.length}):
-                </span>
-                {citedByThis.length > 0 ? (
-                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                    {citedByThis.map((p) => (
-                      <span
-                        key={p.id}
-                        onClick={() => setSelectedNodeId(p.id)}
-                        className="badge-pill badge-emerald"
-                        style={{ cursor: "pointer", fontSize: "0.75rem" }}
-                      >
-                        #{p.id} ({p.year || "N/A"}): {p.title.slice(0, 22)}…
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <span className="muted" style={{ fontSize: "0.78rem" }}>Latest frontier model (no subsequent works yet)</span>
-                )}
-              </div>
-            </div>
-
-            {/* Drawer Actions: Copy BibTeX & Ask AI */}
-            <div style={{ display: "flex", gap: "12px", marginTop: "16px", paddingTop: "12px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+            {onAskPaper && (
               <button
                 className="auth-submit-btn"
-                style={{ width: "auto", padding: "8px 18px", fontSize: "0.84rem", background: "rgba(16, 185, 129, 0.2)", border: "1px solid rgba(16, 185, 129, 0.4)", color: "#34D399" }}
-                onClick={() => handleCopyBibTeX(selectedNode)}
+                style={{ width: "auto", padding: "9px 20px", fontSize: "0.86rem", display: "inline-flex", alignItems: "center", gap: "8px", cursor: "pointer" }}
+                onClick={() => onAskPaper(selectedNode.title)}
               >
-                📋 Copy BibTeX Citation
+                <span>🤖</span> Ask AI Copilot About This Paper
               </button>
-              {onAskPaper && (
-                <button
-                  className="auth-submit-btn"
-                  style={{ width: "auto", padding: "8px 18px", fontSize: "0.84rem" }}
-                  onClick={() => onAskPaper(selectedNode.title)}
-                >
-                  🤖 Ask AI Copilot About This Paper
-                </button>
-              )}
-            </div>
+            )}
           </div>
         )}
       </div>

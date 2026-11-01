@@ -10,7 +10,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     llm_api_key: str = ""
     llm_base_url: str = ""
-    llm_model: str = "gemini-3.5-flash"
+    llm_model: str = "gemini-3.8-flash"
+    use_celery: bool = True
 
     model_config = SettingsConfigDict(
         env_file=[".env", "../.env"],

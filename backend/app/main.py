@@ -21,6 +21,26 @@ async def lifespan(app):
     import threading
     from app.retrieval.embeddings import warmup_embeddings
     threading.Thread(target=warmup_embeddings, daemon=True).start()
+
+    # Auto-recover any orphaned or interrupted papers in background
+    def recover_orphaned_papers():
+        import time
+        from app.db import SessionLocal
+        from app.models import Paper
+        from app.services.paper_service import process_paper_background
+        time.sleep(3)
+        db = SessionLocal()
+        try:
+            orphans = db.query(Paper).filter(Paper.status.in_(["PROCESSING", "QUEUED"])).all()
+            for p in orphans:
+                try:
+                    process_paper_background(p.id)
+                except Exception:
+                    pass
+        finally:
+            db.close()
+
+    threading.Thread(target=recover_orphaned_papers, daemon=True).start()
     yield
 
 app = FastAPI(title="ScholarPulse API", version="0.2.0", lifespan=lifespan)

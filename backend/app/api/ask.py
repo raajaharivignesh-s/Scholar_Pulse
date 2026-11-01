@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/projects", tags=["ask"])
 
 class AskRequest(BaseModel):
     query: str
-    mode: Optional[str] = "deep"  # "deep" (Gemini LLM) or "turbo" (Instant Grounded Synthesis)
+    mode: Optional[str] = "turbo"  # "turbo" (Instant Grounded Synthesis) or "deep" (Gemini LLM)
 
 class SourceItem(BaseModel):
     doc_label: str
@@ -56,7 +56,7 @@ def ask_question(
 
     try:
         agent = CitationResearchAgent(db=db)
-        result = agent.run_research_query(project_id=project_id, query=req.query, mode=req.mode or "deep")
+        result = agent.run_research_query(project_id=project_id, query=req.query, mode=req.mode or "turbo")
         return AskResponse(answer=result["answer"], sources=result["sources"])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Research agent error: {str(e)}")
@@ -79,7 +79,7 @@ def ask_question_stream(
 
     def event_generator():
         try:
-            for event in agent.run_research_query_stream(project_id=project_id, query=req.query, mode=req.mode or "deep"):
+            for event in agent.run_research_query_stream(project_id=project_id, query=req.query, mode=req.mode or "turbo"):
                 yield json.dumps(event) + "\n"
         except Exception as e:
             yield json.dumps({"type": "error", "error": str(e)}) + "\n"

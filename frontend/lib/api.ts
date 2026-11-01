@@ -77,6 +77,7 @@ export type Paper = {
   file_hash: string;
   file_path: string;
   status: string;
+  display_name: string;
   title: string;
   authors: string;
   year: number;
@@ -121,7 +122,7 @@ export type AskResponse = {
   sources: SourceItem[];
 };
 
-export async function askQuestion(projectId: string, query: string, mode: "deep" | "turbo" = "deep"): Promise<AskResponse> {
+export async function askQuestion(projectId: string, query: string, mode: "deep" | "turbo" = "turbo"): Promise<AskResponse> {
   return request<AskResponse>(`/api/projects/${projectId}/ask`, {
     method: "POST",
     body: JSON.stringify({ query, mode }),
@@ -131,7 +132,7 @@ export async function askQuestion(projectId: string, query: string, mode: "deep"
 export async function askQuestionStream(
   projectId: string,
   query: string,
-  mode: "deep" | "turbo" = "deep",
+  mode: "deep" | "turbo" = "turbo",
   onToken: (fullText: string) => void,
   onSources: (sources: SourceItem[]) => void
 ): Promise<string> {
@@ -343,4 +344,20 @@ export async function downloadMarkdownReport(projectId: string) {
 
 export async function downloadBibTeX(projectId: string) {
   return downloadFile(`/api/projects/${projectId}/export/bibtex`, `ScholarPulse_Project_${projectId}_Citations.bib`);
+}
+
+export async function openPaperPdf(projectId: string | number, paperId: string | number) {
+  const h = new Headers();
+  if (typeof window !== "undefined") {
+    const t = localStorage.getItem("sp_token");
+    if (t) h.set("Authorization", `Bearer ${t}`);
+  }
+  const res = await fetch(`${API}/api/projects/${projectId}/papers/${paperId}/pdf`, { headers: h });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to load PDF");
+  }
+  const blob = await res.blob();
+  const fileUrl = window.URL.createObjectURL(blob);
+  window.open(fileUrl, "_blank");
 }

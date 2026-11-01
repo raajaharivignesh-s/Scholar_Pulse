@@ -2,7 +2,11 @@ import re
 from typing import List, Dict, Any, Optional
 
 # Sections that should not consume neural embedding computation
-NON_EMBED_SECTIONS = {"references", "bibliography", "acknowledgments", "acknowledgements"}
+NON_EMBED_SECTIONS = {
+    "references", "bibliography", "acknowledgments", "acknowledgements", 
+    "appendix", "appendices", "author contributions", "funding", 
+    "competing interests", "data availability"
+}
 
 class DocumentChunk:
     def __init__(self, text: str, metadata: Dict[str, Any], should_embed: bool = True):
@@ -17,10 +21,10 @@ def clean_text(text: str) -> str:
     cleaned = re.sub(r'\s+', ' ', text)
     return cleaned.strip()
 
-def chunk_text(text: str, chunk_size: int = 1200, overlap: int = 150) -> List[str]:
+def chunk_text(text: str, chunk_size: int = 1600, overlap: int = 200) -> List[str]:
     """
     Splits text into overlapping chunks of approximately `chunk_size` characters.
-    1200 characters corresponds to full semantic academic paragraphs.
+    1600 characters captures full semantic paragraphs with hypothesis and evidence intact.
     """
     if not text:
         return []
@@ -69,7 +73,7 @@ def process_structured_document(
         sec_lower = sec_name.strip().lower()
         should_embed = sec_lower not in NON_EMBED_SECTIONS
 
-        raw_chunks = chunk_text(sec_text, chunk_size=1200, overlap=150)
+        raw_chunks = chunk_text(sec_text, chunk_size=1600, overlap=200)
         for raw_chunk in raw_chunks:
             # Prefix text with section header tag for LLM context grounding
             prefixed_text = f"[Section: {sec_name}] {raw_chunk}"
@@ -93,7 +97,7 @@ def process_document(text: str, document_id: int, project_id: int) -> List[Docum
     """
     Backwards-compatible raw text chunker.
     """
-    raw_chunks = chunk_text(text, chunk_size=1200, overlap=150)
+    raw_chunks = chunk_text(text, chunk_size=1600, overlap=200)
     doc_chunks = []
     
     for i, chunk_text_content in enumerate(raw_chunks):

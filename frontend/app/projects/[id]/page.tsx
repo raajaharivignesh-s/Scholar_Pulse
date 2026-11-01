@@ -19,7 +19,8 @@ import {
   getCitations,
   Citations,
   User,
-  logout
+  logout,
+  openPaperPdf
 } from "../../../lib/api";
 import CitationGraph from "../../../components/CitationGraph";
 import { useParams, useRouter } from "next/navigation";
@@ -417,6 +418,19 @@ export default function Workspace() {
   const [askResult, setAskResult] = useState<{ answer: string; sources: any[] } | null>(null);
   const [asking, setAsking] = useState(false);
   const [selectedSnippet, setSelectedSnippet] = useState<any | null>(null);
+  const [openingPaperId, setOpeningPaperId] = useState<number | null>(null);
+
+  const handleViewPdf = async (paperId: number) => {
+    if (!p?.id) return;
+    setOpeningPaperId(paperId);
+    try {
+      await openPaperPdf(p.id as string, paperId);
+    } catch (err: any) {
+      alert("Could not open PDF: " + (err.message || String(err)));
+    } finally {
+      setOpeningPaperId(null);
+    }
+  };
 
   // Conversational Copilot Chat Feed State
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
@@ -1635,7 +1649,13 @@ export default function Workspace() {
                       }}
                     >
                       <div>
-                        <h4 style={{ fontSize: "1.1rem", marginBottom: "6px", color: "#ffffff" }}>{paper.title || "Untitled Document"}</h4>
+                        <h4 style={{ fontSize: "1.1rem", marginBottom: "4px", color: "#ffffff" }}>{paper.display_name || paper.title || "Untitled Document"}</h4>
+                        {paper.display_name && paper.title && paper.title !== paper.display_name && (
+                          <div style={{ fontSize: "0.78rem", color: "var(--text-muted)", marginBottom: "6px", display: "flex", alignItems: "center", gap: "5px" }}>
+                            <span style={{ background: "rgba(99,102,241,0.15)", border: "1px solid rgba(99,102,241,0.3)", borderRadius: "4px", padding: "1px 6px", color: "#a5b4fc", fontWeight: 600, fontSize: "0.7rem" }}>Detected Title</span>
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "480px" }}>{paper.title}</span>
+                          </div>
+                        )}
                         <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: "0.85rem", color: "var(--text-muted)" }}>
                           {paper.authors && <span>👥 {paper.authors}</span>}
                           {paper.year && <span>📅 {paper.year}</span>}
@@ -1643,7 +1663,53 @@ export default function Workspace() {
                           <span>Uploaded {new Date(paper.created_at).toLocaleDateString()}</span>
                         </div>
                       </div>
-                      <div>{getStatusBadge(paper.status)}</div>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "10px", flexShrink: 0 }}>
+                        <div>{getStatusBadge(paper.status)}</div>
+                        {paper.status === "PROCESSED" && (
+                          <button
+                            type="button"
+                            className="auth-pill"
+                            onClick={() => handleViewPdf(paper.id)}
+                            disabled={openingPaperId === paper.id}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              padding: "6px 14px",
+                              fontSize: "0.82rem",
+                              fontWeight: 600,
+                              borderRadius: "8px",
+                              background: "rgba(99, 102, 241, 0.12)",
+                              borderColor: "rgba(99, 102, 241, 0.35)",
+                              color: "#a5b4fc",
+                              cursor: openingPaperId === paper.id ? "wait" : "pointer",
+                              transition: "all 0.2s ease",
+                            }}
+                            title="Open original PDF in a new tab"
+                          >
+                            {openingPaperId === paper.id ? (
+                              <>
+                                <svg className="spinner-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                                <span>Loading...</span>
+                              </>
+                            ) : (
+                              <>
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                  <polyline points="14 2 14 8 20 8"/>
+                                  <line x1="16" y1="13" x2="8" y2="13"/>
+                                  <line x1="16" y1="17" x2="8" y2="17"/>
+                                </svg>
+                                <span>Open PDF</span>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                  <line x1="7" y1="17" x2="17" y2="7"/>
+                                  <polyline points="7 7 17 7 17 17"/>
+                                </svg>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1660,8 +1726,7 @@ export default function Workspace() {
                 summary={citations.summary}
                 projectId={p?.id ? String(p.id) : undefined}
                 onAskPaper={(paperTitle) => {
-                  setAskQuery(`Analyze the research methodology, key findings, and contributions of the paper: "${paperTitle}"`);
-                  setActiveTab("Ask AI");
+                  exploreInCopilot(`Analyze the research methodology, key findings, and contributions of the paper: "${paperTitle}"`);
                 }}
               />
             ) : (

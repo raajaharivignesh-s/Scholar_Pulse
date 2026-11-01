@@ -1,3 +1,4 @@
+import os
 import hashlib
 import logging
 from typing import List
@@ -18,9 +19,13 @@ def get_embedding_model():
         return None
     if _embedding_model is None:
         try:
-            # Initialize with optimal settings
-            _embedding_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
-            logger.info("FastEmbed BAAI/bge-small-en-v1.5 initialized successfully.")
+            # Multi-threaded ONNX execution utilizing all CPU cores
+            threads = max(1, os.cpu_count() or 4)
+            _embedding_model = TextEmbedding(
+                model_name="BAAI/bge-small-en-v1.5",
+                threads=threads
+            )
+            logger.info(f"FastEmbed BAAI/bge-small-en-v1.5 initialized with {threads} CPU threads.")
         except Exception as e:
             logger.warning(f"Failed to load FastEmbed model: {e}")
             _embedding_model = None
@@ -48,9 +53,9 @@ def fallback_vector(text: str, dim: int = VECTOR_SIZE) -> List[float]:
         vec.extend(vec)
     return vec[:dim]
 
-def generate_embeddings(texts: List[str], batch_size: int = 64) -> List[List[float]]:
+def generate_embeddings(texts: List[str], batch_size: int = 256) -> List[List[float]]:
     """
-    Generate embeddings for a list of strings using FastEmbed with batching and fallback support.
+    Generate embeddings for a list of strings using FastEmbed with multi-core parallel batching.
     Returns a list of 384-dimensional float arrays.
     """
     if not texts:
@@ -61,7 +66,12 @@ def generate_embeddings(texts: List[str], batch_size: int = 64) -> List[List[flo
         return [fallback_vector(t) for t in texts]
 
     try:
-        embeddings_gen = model.embed(texts, batch_size=batch_size)
+        parallel_workers = min(4, max(1, (os.cpu_count() or 2) // 2))
+        embeddings_gen = model.embed(
+            texts, 
+            batch_size=batch_size,
+            parallel=parallel_workers if len(texts) > 20 else None
+        )
         vectors = [list(map(float, emb)) for emb in embeddings_gen]
         return vectors
     except Exception as e:

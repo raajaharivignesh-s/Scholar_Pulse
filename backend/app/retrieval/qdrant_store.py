@@ -25,7 +25,7 @@ def get_qdrant_client() -> Optional[Any]:
         return None
     if _qdrant_client is None:
         try:
-            client = QdrantClient(url=QDRANT_URL, timeout=3.0)
+            client = QdrantClient(url=QDRANT_URL, timeout=3.0, check_compatibility=False)
             _init_collection(client)
             _qdrant_client = client
         except Exception as e:
@@ -95,7 +95,8 @@ def store_chunks(chunks: List[DocumentChunk]):
 
         client.upsert(
             collection_name=COLLECTION_NAME,
-            points=points
+            points=points,
+            wait=False
         )
         logger.info(f"Upserted {len(points)} vector points into Qdrant collection '{COLLECTION_NAME}' (skipped {len(chunks) - len(embed_chunks)} non-semantic reference chunks)")
     except Exception as e:

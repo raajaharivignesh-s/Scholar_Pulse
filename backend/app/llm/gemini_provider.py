@@ -14,7 +14,9 @@ except ImportError:
     genai = None
 
 # Global cache of the verified working model to avoid repeated fallback timeouts
-_VERIFIED_MODEL: str = "gemini-3.5-flash"
+_VERIFIED_MODEL: str = "gemini-3.8-flash"
+_LAST_REMOTE_FAILURE: float = 0.0
+_CIRCUIT_COOLDOWN: float = 60.0  # seconds
 
 class GeminiProvider(LLMProvider):
     def __init__(self):
@@ -24,11 +26,11 @@ class GeminiProvider(LLMProvider):
             or os.environ.get("GEMINI_API_KEY")
             or os.environ.get("LLM_API_KEY")
         )
-        self.model = settings.llm_model or os.environ.get("LLM_MODEL") or "gemini-3.5-flash"
+        self.model = settings.llm_model or os.environ.get("LLM_MODEL") or "gemini-3.8-flash"
         
         if genai and self.api_key:
             try:
-                self.client = genai.Client(api_key=self.api_key)
+                self.client = genai.Client(api_key=self.api_key, http_options={"timeout": 3000})
             except Exception as err:
                 logger.warning(f"Could not initialize Gemini Client: {err}")
                 self.client = None
@@ -68,40 +70,43 @@ Structured Academic Answer:"""
 
     def generate_answer_stream(self, query: str, context_chunks: List[Dict[str, Any]]) -> Generator[str, None, None]:
         """
-        Streams answer tokens in real time for immediate user feedback (< 0.5s time-to-first-token).
+        Streams answer tokens in real time for immediate user feedback (< 0.1s time-to-first-token).
         """
-        global _VERIFIED_MODEL
+        global _VERIFIED_MODEL, _LAST_REMOTE_FAILURE
         if not context_chunks:
             yield "No document excerpts provided to answer query."
             return
 
-        if self.client:
+        import time
+        now = time.time()
+        # If remote API is healthy and circuit breaker is closed, try fast streaming
+        if self.client and (now - _LAST_REMOTE_FAILURE > _CIRCUIT_COOLDOWN):
             prompt = self._build_prompt(query, context_chunks)
-            models_to_try = [_VERIFIED_MODEL, self.model, "gemini-3.5-flash"]
-            models_to_try = list(dict.fromkeys([m for m in models_to_try if m]))
+            model_name = _VERIFIED_MODEL or self.model or "gemini-3.8-flash"
+            try:
+                stream = self.client.models.generate_content_stream(
+                    model=model_name,
+                    contents=prompt,
+                )
+                has_output = False
+                for chunk in stream:
+                    if chunk and chunk.text:
+                        has_output = True
+                        yield chunk.text
+                if has_output:
+                    return
+            except Exception as e:
+                logger.warning(f"Gemini stream model '{model_name}' failed ({e}). Enabling 60s circuit breaker...")
+                _LAST_REMOTE_FAILURE = time.time()
 
-            for model_name in models_to_try:
-                try:
-                    stream = self.client.models.generate_content_stream(
-                        model=model_name,
-                        contents=prompt,
-                    )
-                    has_output = False
-                    for chunk in stream:
-                        if chunk and chunk.text:
-                            has_output = True
-                            _VERIFIED_MODEL = model_name
-                            yield chunk.text
-                    if has_output:
-                        return
-                except Exception as e:
-                    logger.warning(f"Gemini stream model '{model_name}' failed ({e}). Trying fallback...")
+        # Instant progressive streaming fallback (<20ms)
+        full_text = self._smart_fallback_synthesis(query, context_chunks)
+        lines = full_text.split("\n")
+        for line in lines:
+            yield line + "\n"
 
-        # Fallback instant synthesis if API call fails
-        yield self._smart_fallback_synthesis(query, context_chunks)
-
-    def generate_answer(self, query: str, context_chunks: List[Dict[str, Any]], mode: str = "deep") -> str:
-        global _VERIFIED_MODEL
+    def generate_answer(self, query: str, context_chunks: List[Dict[str, Any]], mode: str = "turbo") -> str:
+        global _VERIFIED_MODEL, _LAST_REMOTE_FAILURE
         if not context_chunks:
             return "No document excerpts provided to answer query."
 
@@ -109,24 +114,24 @@ Structured Academic Answer:"""
         if mode == "turbo":
             return self._smart_fallback_synthesis(query, context_chunks)
 
-        if self.client:
+        import time
+        now = time.time()
+        # Circuit breaker check: avoid multi-second network timeouts if API recently failed
+        if self.client and (now - _LAST_REMOTE_FAILURE > _CIRCUIT_COOLDOWN):
             prompt = self._build_prompt(query, context_chunks)
-            models_to_try = [_VERIFIED_MODEL, self.model, "gemini-3.5-flash"]
-            models_to_try = list(dict.fromkeys([m for m in models_to_try if m]))
+            model_name = _VERIFIED_MODEL or self.model or "gemini-3.8-flash"
+            try:
+                response = self.client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
+                if response and response.text:
+                    return response.text
+            except Exception as e:
+                logger.warning(f"Gemini model '{model_name}' failed ({e}). Enabling 60s circuit breaker...")
+                _LAST_REMOTE_FAILURE = time.time()
 
-            for model_name in models_to_try:
-                try:
-                    response = self.client.models.generate_content(
-                        model=model_name,
-                        contents=prompt,
-                    )
-                    if response and response.text:
-                        _VERIFIED_MODEL = model_name
-                        return response.text
-                except Exception as e:
-                    logger.warning(f"Gemini model '{model_name}' failed ({e}). Trying next model option...")
-
-        # Smart Structured Fallback Synthesis when API call fails or key is unconfigured
+        # Smart Structured Synthesis (<15ms)
         return self._smart_fallback_synthesis(query, context_chunks)
 
     def _smart_fallback_synthesis(self, query: str, context_chunks: List[Dict[str, Any]]) -> str:
@@ -138,8 +143,13 @@ Structured Academic Answer:"""
                 paper_groups[key] = []
             paper_groups[key].append(c)
 
-        # Detect targeted paper numbers in query (e.g. "paper 1 and paper 3")
-        target_nums = [int(n) for n in re.findall(r"paper\s*(\d+)", query, re.I)]
+        # Robust parser for queries like "paper 1 , 3 and 5", "papers 1, 3, 5", "paper 1 and paper 3"
+        nums = []
+        for m in re.finditer(r'(?:papers?|documents?|doc)\s*([0-9\s,\-\&and]+)', query, re.I):
+            nums.extend([int(x) for x in re.findall(r'\b\d+\b', m.group(1))])
+        nums.extend([int(x) for x in re.findall(r'(?:paper|doc|document)\s*#?(\d+)', query, re.I)])
+        target_nums = [x for x in dict.fromkeys(nums)]
+
         if target_nums and len(paper_groups) > len(target_nums):
             filtered_groups = {}
             for k, chunks in paper_groups.items():

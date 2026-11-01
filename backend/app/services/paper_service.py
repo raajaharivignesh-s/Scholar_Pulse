@@ -9,6 +9,7 @@ from sqlalchemy import or_
 
 from app.models import Paper, Project
 from app.db import SessionLocal
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 STORAGE_DIR = os.environ.get("STORAGE_DIR", "/storage/papers")
@@ -130,6 +131,7 @@ async def upload_paper(
         file_hash=file_hash,
         file_path="",  
         status="QUEUED",
+        display_name=file.filename,
         title=file.filename
     )
     db.add(paper)
@@ -148,7 +150,8 @@ async def upload_paper(
 
     # Dispatch Celery if explicitly configured, otherwise execute via non-blocking BackgroundTasks
     dispatched = False
-    if os.environ.get("USE_CELERY", "false").lower() in ("true", "1"):
+    use_celery = getattr(settings, "use_celery", True) and os.environ.get("USE_CELERY", "true").lower() in ("true", "1")
+    if use_celery:
         try:
             from app.workers.paper_tasks import process_paper_task
             process_paper_task.delay(paper.id)
@@ -203,3 +206,22 @@ def list_papers(
 
     return query.all()
 
+
+def get_paper_file(
+    db: Session,
+    project_id: int,
+    user_id: int,
+    paper_id: int
+) -> tuple[str, str]:
+    project = db.query(Project).filter(Project.id == project_id, Project.owner_id == user_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+    paper = db.query(Paper).filter(Paper.id == paper_id, Paper.project_id == project_id).first()
+    if not paper:
+        raise HTTPException(status_code=404, detail="Paper not found")
+    if not paper.file_path or not os.path.exists(paper.file_path):
+        raise HTTPException(status_code=404, detail="PDF file not found on disk")
+    filename = paper.display_name or paper.title or "paper.pdf"
+    if not filename.lower().endswith(".pdf"):
+        filename += ".pdf"
+    return paper.file_path, filename
