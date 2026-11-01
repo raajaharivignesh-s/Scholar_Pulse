@@ -1,20 +1,109 @@
-from typing import Optional
-from sqlalchemy import or_
-
 import os
 import hashlib
 import logging
-from fastapi import UploadFile, HTTPException
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
+from fastapi import UploadFile, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
+
 from app.models import Paper, Project
+from app.db import SessionLocal
 
 logger = logging.getLogger(__name__)
 STORAGE_DIR = os.environ.get("STORAGE_DIR", "/storage/papers")
 
+# Dedicated thread pool for async paper processing when Celery is not configured
+_processing_executor = ThreadPoolExecutor(max_workers=3, thread_name_prefix="scholarpulse-worker")
+
 def calculate_file_hash(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
-async def upload_paper(db: Session, project_id: int, user_id: int, file: UploadFile) -> Paper:
+def process_paper_background(paper_id: int):
+    """
+    Dedicated background processor for paper ingestion.
+    Extracts structured text via PyMuPDF (fast C engine),
+    chunks sections while skipping heavy references embeddings,
+    and upserts into Qdrant vector index.
+    """
+    from app.ingestion.pdf_parser import extract_structured_pdf
+    from app.ingestion.chunker import process_structured_document, process_document
+    from app.retrieval.qdrant_store import store_chunks
+
+    db = SessionLocal()
+    try:
+        paper = db.query(Paper).filter(Paper.id == paper_id).first()
+        if not paper:
+            logger.error(f"Paper {paper_id} not found in database for processing")
+            return
+
+        logger.info(f"Background processing started for paper {paper_id} ({paper.title})")
+        paper.status = "PROCESSING"
+        db.commit()
+
+        if not paper.file_path or not os.path.exists(paper.file_path):
+            logger.error(f"File path missing or invalid for paper {paper_id}: {paper.file_path}")
+            paper.status = "FAILED"
+            db.commit()
+            return
+
+        structured = extract_structured_pdf(paper.file_path)
+        text = structured.get("text")
+        if not text or not text.strip():
+            logger.warning(f"Extracted empty text for paper {paper_id}")
+            paper.status = "FAILED_EXTRACTION"
+            db.commit()
+            return
+
+        # Update paper metadata from PDF
+        meta = structured.get("metadata", {})
+        if meta.get("title") and (not paper.title or paper.title.endswith(".pdf")):
+            paper.title = meta["title"]
+        if meta.get("authors") and not paper.authors:
+            paper.authors = meta["authors"]
+        if meta.get("year") and not paper.year:
+            paper.year = meta["year"]
+        if meta.get("doi") and not paper.doi:
+            paper.doi = meta["doi"]
+
+        sections = structured.get("sections", [])
+        if sections:
+            chunks = process_structured_document(sections, document_id=paper.id, project_id=paper.project_id)
+        else:
+            chunks = process_document(text, document_id=paper.id, project_id=paper.project_id)
+
+        if chunks:
+            store_chunks(chunks)
+            paper.status = "PROCESSED"
+            try:
+                from app.retrieval.bm25_search import invalidate_project_chunks_cache
+                invalidate_project_chunks_cache(paper.project_id)
+            except Exception:
+                pass
+            logger.info(f"Successfully processed paper {paper_id} with {len(chunks)} chunks")
+        else:
+            paper.status = "FAILED"
+
+        db.commit()
+    except Exception as exc:
+        logger.error(f"Background processing failed for paper {paper_id}: {exc}", exc_info=True)
+        try:
+            paper = db.query(Paper).filter(Paper.id == paper_id).first()
+            if paper:
+                paper.status = "FAILED"
+                db.commit()
+        except Exception:
+            pass
+    finally:
+        db.close()
+
+async def upload_paper(
+    db: Session,
+    project_id: int,
+    user_id: int,
+    file: UploadFile,
+    background_tasks: Optional[BackgroundTasks] = None
+) -> Paper:
     project = db.query(Project).filter(Project.id == project_id, Project.owner_id == user_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found or unauthorized")
@@ -57,54 +146,25 @@ async def upload_paper(db: Session, project_id: int, user_id: int, file: UploadF
     db.commit()
     db.refresh(paper)
 
-    # Dispatch Celery async task, with graceful fallback to inline processing if Celery is offline
-    try:
-        from app.workers.paper_tasks import process_paper_task
-        process_paper_task.delay(paper.id)
-        logger.info(f"Dispatched Celery task for paper {paper.id}")
-    except Exception as e:
-        logger.warning(f"Could not dispatch Celery task ({e}). Running processing inline...")
+    # Dispatch Celery if explicitly configured, otherwise execute via non-blocking BackgroundTasks
+    dispatched = False
+    if os.environ.get("USE_CELERY", "false").lower() in ("true", "1"):
         try:
-            from app.ingestion.pdf_parser import extract_structured_pdf
-            from app.ingestion.chunker import process_structured_document, process_document
-            from app.retrieval.qdrant_store import store_chunks
-            
-            paper.status = "PROCESSING"
-            db.commit()
-            
-            structured = extract_structured_pdf(file_path)
-            text = structured.get("text")
-            if text and text.strip():
-                meta = structured.get("metadata", {})
-                if meta.get("title") and (not paper.title or paper.title.endswith(".pdf")):
-                    paper.title = meta["title"]
-                if meta.get("authors") and not paper.authors:
-                    paper.authors = meta["authors"]
-                if meta.get("year") and not paper.year:
-                    paper.year = meta["year"]
-                if meta.get("doi") and not paper.doi:
-                    paper.doi = meta["doi"]
+            from app.workers.paper_tasks import process_paper_task
+            process_paper_task.delay(paper.id)
+            dispatched = True
+            logger.info(f"Dispatched Celery task for paper {paper.id}")
+        except Exception as e:
+            logger.warning(f"Could not dispatch Celery task ({e}). Falling back to BackgroundTasks...")
 
-                sections = structured.get("sections", [])
-                if sections:
-                    chunks = process_structured_document(sections, document_id=paper.id, project_id=project_id)
-                else:
-                    chunks = process_document(text, document_id=paper.id, project_id=project_id)
+    if not dispatched:
+        if background_tasks is not None:
+            background_tasks.add_task(process_paper_background, paper.id)
+            logger.info(f"Scheduled FastAPI background processing task for paper {paper.id}")
+        else:
+            _processing_executor.submit(process_paper_background, paper.id)
+            logger.info(f"Submitted paper {paper.id} to ThreadPoolExecutor")
 
-                if chunks:
-                    store_chunks(chunks)
-                    paper.status = "PROCESSED"
-                else:
-                    paper.status = "FAILED"
-            else:
-                paper.status = "FAILED_EXTRACTION"
-        except Exception as inline_err:
-            logger.error(f"Inline processing failed for paper {paper.id}: {inline_err}")
-            paper.status = "FAILED"
-        finally:
-            db.commit()
-            db.refresh(paper)
-    
     return paper
 
 def list_papers(

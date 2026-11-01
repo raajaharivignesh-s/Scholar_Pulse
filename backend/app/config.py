@@ -7,12 +7,13 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
 
     jwt_secret: str = "change-me"
+    gemini_api_key: str = ""
     llm_api_key: str = ""
     llm_base_url: str = ""
-    llm_model: str = ""
+    llm_model: str = "gemini-3.5-flash"
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=[".env", "../.env"],
         extra="ignore",
     )
 

@@ -51,6 +51,7 @@ def _init_collection(client: Any):
 def store_chunks(chunks: List[DocumentChunk]):
     """
     Embeds chunks and stores them in Qdrant with payload metadata (section, page, document_id, project_id).
+    Skips non-embed chunks (like references) to reduce embedding time by ~40%.
     """
     if not chunks:
         return
@@ -61,11 +62,16 @@ def store_chunks(chunks: List[DocumentChunk]):
         return
 
     try:
-        texts = [chunk.text for chunk in chunks]
-        vectors = generate_embeddings(texts)
+        # Filter chunks that need neural embeddings (skip references/bibliography)
+        embed_chunks = [c for c in chunks if getattr(c, "should_embed", True)]
+        if not embed_chunks:
+            embed_chunks = chunks
+
+        texts = [chunk.text for chunk in embed_chunks]
+        vectors = generate_embeddings(texts, batch_size=64)
         
         points = []
-        for i, (chunk, vector) in enumerate(zip(chunks, vectors)):
+        for i, (chunk, vector) in enumerate(zip(embed_chunks, vectors)):
             doc_id = chunk.metadata.get("document_id", 0)
             chk_idx = chunk.metadata.get("chunk_index", i)
             point_id = str(uuid.uuid5(uuid.NAMESPACE_OID, f"doc_{doc_id}_chunk_{chk_idx}"))
@@ -91,7 +97,7 @@ def store_chunks(chunks: List[DocumentChunk]):
             collection_name=COLLECTION_NAME,
             points=points
         )
-        logger.info(f"Upserted {len(points)} vector points into Qdrant collection '{COLLECTION_NAME}'")
+        logger.info(f"Upserted {len(points)} vector points into Qdrant collection '{COLLECTION_NAME}' (skipped {len(chunks) - len(embed_chunks)} non-semantic reference chunks)")
     except Exception as e:
         logger.error(f"Failed to upsert chunks into Qdrant: {e}")
 

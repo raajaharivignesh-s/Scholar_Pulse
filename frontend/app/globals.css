@@ -53,7 +53,7 @@ html, body {
   color: var(--text-main);
   font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
-  overflow-x: hidden;
+  overflow-x: clip;
 }
 
 /* Typography & Headings */
@@ -272,7 +272,9 @@ button:active {
   font-weight: 800;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
+
 
 .badge-emerald {
   background: rgba(16, 185, 129, 0.15);
@@ -309,8 +311,12 @@ button:active {
   align-items: center;
   justify-content: space-between;
   padding: 0 28px;
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  right: 0;
+  width: 100%;
+  box-sizing: border-box;
   z-index: 100;
 }
 
@@ -349,6 +355,8 @@ button:active {
 /* Layouts */
 .workspace {
   min-height: 100vh;
+  padding-top: 64px;
+  box-sizing: border-box;
 }
 
 .content {
@@ -413,8 +421,9 @@ button:active {
 /* App Shell (Projects Detail Workspace) */
 .app-shell {
   min-height: calc(100vh - 64px);
-  display: grid;
-  grid-template-columns: 260px 1fr;
+  padding-left: 260px;
+  display: block;
+  box-sizing: border-box;
 }
 
 .sidebar {
@@ -425,9 +434,17 @@ button:active {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  position: sticky;
+  position: fixed;
   top: 64px;
+  left: 0;
+  bottom: 0;
+  width: 260px;
   height: calc(100vh - 64px);
+  overflow: hidden;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  user-select: none;
+  z-index: 90;
 }
 
 .project-mini {
@@ -535,8 +552,32 @@ button:active {
 
 .workspace-main {
   padding: 36px 40px;
-  max-width: 1400px;
   width: 100%;
+  box-sizing: border-box;
+}
+
+/* Custom Scrollbars for Main Workspace */
+.workspace-main {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99, 102, 241, 0.3) rgba(10, 15, 28, 0.2);
+}
+
+.workspace-main::-webkit-scrollbar {
+  width: 6px;
+}
+
+.workspace-main::-webkit-scrollbar-track {
+  background: rgba(10, 15, 28, 0.2);
+  border-radius: 8px;
+}
+
+.workspace-main::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.3);
+  border-radius: 8px;
+}
+
+.workspace-main::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.5);
 }
 
 .metric-grid {
@@ -1145,20 +1186,7 @@ button:active {
   flex-direction: column;
 }
 
-/* Topbar Header */
-.topbar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 32px;
-  background: rgba(9, 13, 22, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  position: sticky;
-  top: 0;
-  z-index: 40;
-}
+/* Topbar Brand and Profile Elements */
 
 .topbar-brand {
   display: flex;
@@ -1720,12 +1748,55 @@ button:active {
 /* Responsive */
 @media (max-width: 900px) {
   .app-shell {
-    grid-template-columns: 1fr;
+    padding-left: 0;
+    height: auto;
+    max-height: none;
+    overflow: visible;
   }
   .sidebar {
     display: none;
   }
   .workspace-main {
     padding: 24px 20px;
+    height: auto;
+    max-height: none;
+    overflow: visible;
   }
 }
+
+/* AI Copilot Chat Styles & Custom Scrollbar */
+.chat-scroll-container {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(99, 102, 241, 0.4) rgba(15, 23, 42, 0.4);
+}
+
+.chat-scroll-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-scroll-container::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.4);
+  border-radius: 8px;
+}
+
+.chat-scroll-container::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.35);
+  border-radius: 8px;
+}
+
+.chat-scroll-container::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.65);
+}
+
+@keyframes blinkCursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.typing-cursor {
+  display: inline-block;
+  margin-left: 3px;
+  color: var(--accent-cyan);
+  font-weight: 700;
+  animation: blinkCursor 0.8s infinite;
+}

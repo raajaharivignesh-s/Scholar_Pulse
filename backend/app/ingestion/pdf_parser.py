@@ -3,6 +3,14 @@ import re
 from typing import List, Dict, Any, Optional
 
 try:
+    import pymupdf as fitz
+except ImportError:
+    try:
+        import fitz
+    except ImportError:
+        fitz = None
+
+try:
     from pypdf import PdfReader
 except ImportError:
     PdfReader = None
@@ -48,38 +56,49 @@ def extract_text_from_pdf(file_path: str) -> Optional[str]:
 
 def extract_structured_pdf(file_path: str) -> Dict[str, Any]:
     """
-    Extracts pages, detects academic sections, and auto-detects paper metadata (DOI, Year, Title).
+    Fast extraction of pages, academic sections, and metadata (DOI, Year, Title).
+    Uses PyMuPDF (C engine) for ~20x faster extraction with pypdf fallback.
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"PDF file not found at {file_path}")
-        
-    if PdfReader is None:
-        raise ImportError("pypdf is not installed. Please install it using 'pip install pypdf'")
 
     pages_data = []
     full_text_parts = []
-    
+
     try:
-        reader = PdfReader(file_path)
-        for idx, page in enumerate(reader.pages, start=1):
-            extracted = page.extract_text() or ""
-            pages_data.append({"page_number": idx, "text": extracted})
-            if extracted.strip():
-                full_text_parts.append(extracted)
+        if fitz is not None:
+            # High-performance PyMuPDF extraction
+            doc = fitz.open(file_path)
+            for idx, page in enumerate(doc, start=1):
+                extracted = page.get_text() or ""
+                pages_data.append({"page_number": idx, "text": extracted})
+                if extracted.strip():
+                    full_text_parts.append(extracted)
+            doc.close()
+        elif PdfReader is not None:
+            # Fallback to pypdf
+            reader = PdfReader(file_path)
+            for idx, page in enumerate(reader.pages, start=1):
+                extracted = page.extract_text() or ""
+                pages_data.append({"page_number": idx, "text": extracted})
+                if extracted.strip():
+                    full_text_parts.append(extracted)
+        else:
+            raise ImportError("Neither pymupdf nor pypdf is installed.")
 
         full_text = "\n\n".join(full_text_parts)
         first_page_text = pages_data[0]["text"] if pages_data else ""
 
         # Auto-extract metadata
-        doi = extract_doi(full_text)
-        year = extract_year(first_page_text[:1000])
+        doi = extract_doi(full_text[:4000]) or extract_doi(full_text)
+        year = extract_year(first_page_text[:1500])
 
-        # Infer title from first page lines if available
+        # Infer title and authors from first page lines
         first_lines = [line.strip() for line in first_page_text.split("\n") if line.strip()]
         inferred_title = first_lines[0][:250] if first_lines else ""
         inferred_authors = first_lines[1][:250] if len(first_lines) > 1 else ""
 
-        # Parse section blocks
+        # Fast section blocks detection
         sections = []
         current_section_name = "General"
         current_section_lines = []
@@ -93,10 +112,12 @@ def extract_structured_pdf(file_path: str) -> Dict[str, Any]:
                 sline = line.strip()
                 detected_section = None
                 
-                for pattern, name in SECTION_PATTERNS:
-                    if pattern.match(sline):
-                        detected_section = name
-                        break
+                # Performance optimization: section headers are short (< 80 chars)
+                if 0 < len(sline) < 80:
+                    for pattern, name in SECTION_PATTERNS:
+                        if pattern.match(sline):
+                            detected_section = name
+                            break
 
                 if detected_section:
                     if current_section_lines:

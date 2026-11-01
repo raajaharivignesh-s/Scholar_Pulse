@@ -1,6 +1,8 @@
 import hashlib
+import logging
 from typing import List
 
+logger = logging.getLogger(__name__)
 VECTOR_SIZE = 384
 
 try:
@@ -16,11 +18,26 @@ def get_embedding_model():
         return None
     if _embedding_model is None:
         try:
+            # Initialize with optimal settings
             _embedding_model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
+            logger.info("FastEmbed BAAI/bge-small-en-v1.5 initialized successfully.")
         except Exception as e:
-            print(f"Failed to load FastEmbed model: {e}")
+            logger.warning(f"Failed to load FastEmbed model: {e}")
             _embedding_model = None
     return _embedding_model
+
+def warmup_embeddings():
+    """
+    Pre-warms the embedding model into memory during server startup
+    to prevent cold-start latency on the user's first document upload.
+    """
+    try:
+        model = get_embedding_model()
+        if model is not None:
+            list(model.embed(["ScholarPulse pre-warm"]))
+            logger.info("Embedding model pre-warmed successfully.")
+    except Exception as e:
+        logger.warning(f"Embedding warmup warning: {e}")
 
 def fallback_vector(text: str, dim: int = VECTOR_SIZE) -> List[float]:
     """Generates a deterministic float vector based on text hash for offline/fallback use."""
@@ -31,9 +48,9 @@ def fallback_vector(text: str, dim: int = VECTOR_SIZE) -> List[float]:
         vec.extend(vec)
     return vec[:dim]
 
-def generate_embeddings(texts: List[str]) -> List[List[float]]:
+def generate_embeddings(texts: List[str], batch_size: int = 64) -> List[List[float]]:
     """
-    Generate embeddings for a list of strings using FastEmbed with fallback support.
+    Generate embeddings for a list of strings using FastEmbed with batching and fallback support.
     Returns a list of 384-dimensional float arrays.
     """
     if not texts:
@@ -44,9 +61,9 @@ def generate_embeddings(texts: List[str]) -> List[List[float]]:
         return [fallback_vector(t) for t in texts]
 
     try:
-        embeddings_gen = model.embed(texts)
+        embeddings_gen = model.embed(texts, batch_size=batch_size)
         vectors = [list(map(float, emb)) for emb in embeddings_gen]
         return vectors
     except Exception as e:
-        print(f"Error during FastEmbed generation: {e}. Using fallback vector generation.")
+        logger.warning(f"Error during FastEmbed generation: {e}. Using fallback vector generation.")
         return [fallback_vector(t) for t in texts]

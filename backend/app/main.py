@@ -17,6 +17,10 @@ async def lifespan(app):
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE projects DROP COLUMN IF EXISTS research_question;"))
         conn.commit()
+    # Pre-warm FastEmbed model in background thread to eliminate first-upload cold start
+    import threading
+    from app.retrieval.embeddings import warmup_embeddings
+    threading.Thread(target=warmup_embeddings, daemon=True).start()
     yield
 
 app = FastAPI(title="ScholarPulse API", version="0.2.0", lifespan=lifespan)
