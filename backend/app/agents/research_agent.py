@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 from sqlalchemy.orm import Session
-from app.agents.research_graph import run_research_graph
+from app.agents.research_graph import run_research_graph, run_research_graph_stream
 
 class CitationResearchAgent:
     """
@@ -14,5 +14,8 @@ class CitationResearchAgent:
     def __init__(self, db: Session):
         self.db = db
 
-    def run_research_query(self, project_id: int, query: str, top_k: int = 5) -> Dict[str, Any]:
-        return run_research_graph(project_id=project_id, query=query, db=self.db)
+    def run_research_query(self, project_id: int, query: str, mode: str = "deep", top_k: int = 5) -> Dict[str, Any]:
+        return run_research_graph(project_id=project_id, query=query, db=self.db, mode=mode)
+
+    def run_research_query_stream(self, project_id: int, query: str, mode: str = "deep"):
+        return run_research_graph_stream(project_id=project_id, query=query, db=self.db, mode=mode)

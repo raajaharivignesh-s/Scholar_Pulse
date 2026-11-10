@@ -1,5 +1,7 @@
+import json
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, field_validator
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.dependencies import get_current_user
@@ -11,6 +13,7 @@ router = APIRouter(prefix="/api/projects", tags=["ask"])
 
 class AskRequest(BaseModel):
     query: str
+    mode: Optional[str] = "turbo"  # "turbo" (Instant Grounded Synthesis) or "deep" (Gemini LLM)
 
 class SourceItem(BaseModel):
     doc_label: str
@@ -20,6 +23,18 @@ class SourceItem(BaseModel):
     year: Optional[int] = None
     snippet: str
     rrf_score: Optional[float] = 0.0
+
+    @field_validator('year', mode='before')
+    @classmethod
+    def parse_year(cls, v):
+        if v == "" or v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                return int(v)
+            except ValueError:
+                return None
+        return v
 
 class AskResponse(BaseModel):
     answer: str
@@ -32,7 +47,6 @@ def ask_question(
     db: Session = Depends(get_db), 
     current_user = Depends(get_current_user)
 ):
-    # Verify project ownership
     project = db.query(Project).filter(Project.id == project_id, Project.owner_id == current_user.id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found or unauthorized")
@@ -42,7 +56,36 @@ def ask_question(
 
     try:
         agent = CitationResearchAgent(db=db)
-        result = agent.run_research_query(project_id=project_id, query=req.query)
+        result = agent.run_research_query(project_id=project_id, query=req.query, mode=req.mode or "turbo")
         return AskResponse(answer=result["answer"], sources=result["sources"])
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Research agent error: {str(e)}")
+
+@router.post("/{project_id}/ask/stream")
+def ask_question_stream(
+    project_id: int,
+    req: AskRequest,
+    db: Session = Depends(get_db),
+    current_user = Depends(get_current_user)
+):
+    project = db.query(Project).filter(Project.id == project_id, Project.owner_id == current_user.id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found or unauthorized")
+
+    if not req.query or not req.query.strip():
+        raise HTTPException(status_code=400, detail="Query cannot be empty")
+
+    agent = CitationResearchAgent(db=db)
+
+    def event_generator():
+        try:
+            for event in agent.run_research_query_stream(project_id=project_id, query=req.query, mode=req.mode or "turbo"):
+                yield json.dumps(event) + "\n"
+        except Exception as e:
+            yield json.dumps({"type": "error", "error": str(e)}) + "\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    )

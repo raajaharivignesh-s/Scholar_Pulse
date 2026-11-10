@@ -19,7 +19,8 @@ def list_projects(user: User = Depends(get_current_user), db: Session = Depends(
 
 @router.post("", response_model=ProjectResponse, status_code=201)
 def create_project(payload: ProjectCreate, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    p = Project(owner_id=user.id, name=payload.name.strip(), description=payload.description.strip(), research_question=payload.research_question.strip())
+    desc = (payload.description or "").strip()
+    p = Project(owner_id=user.id, name=payload.name.strip(), description=desc)
     db.add(p); db.commit(); db.refresh(p)
     return p
 

@@ -65,12 +65,6 @@ class Project(Base):
         nullable=False,
     )
 
-    research_question: Mapped[str] = mapped_column(
-        Text,
-        default="",
-        nullable=False,
-    )
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=utcnow,
@@ -104,6 +98,7 @@ class Paper(Base):
         index=True,
     )
 
+    display_name: Mapped[str] = mapped_column(String(500), nullable=True)
     title: Mapped[str] = mapped_column(String(500), nullable=True)
     authors: Mapped[str] = mapped_column(String(1000), nullable=True)
     year: Mapped[int] = mapped_column(nullable=True)

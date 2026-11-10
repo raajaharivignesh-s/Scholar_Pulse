@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, UploadFile, File, Query
+from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, UploadFile, File, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
 
@@ -13,11 +14,12 @@ router = APIRouter(prefix="/api/projects/{project_id}/papers", tags=["papers"])
 @router.post("", response_model=PaperOut)
 async def upload_paper(
     project_id: int,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    return await paper_service.upload_paper(db, project_id, current_user.id, file)
+    return await paper_service.upload_paper(db, project_id, current_user.id, file, background_tasks)
 
 @router.get("", response_model=List[PaperOut])
 def list_papers(
@@ -39,3 +41,17 @@ def list_papers(
         year_max=year_max
     )
 
+
+@router.get("/{paper_id}/pdf")
+def get_paper_pdf(
+    project_id: int,
+    paper_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    file_path, filename = paper_service.get_paper_file(db, project_id, current_user.id, paper_id)
+    return FileResponse(
+        file_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'}
+    )

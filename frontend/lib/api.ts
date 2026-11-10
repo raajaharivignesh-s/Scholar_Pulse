@@ -5,7 +5,6 @@ export type Project = {
   id: number;
   name: string;
   description: string;
-  research_question: string;
   created_at: string;
   updated_at: string;
 };
@@ -17,13 +16,21 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const t = localStorage.getItem("sp_token");
     if (t) h.set("Authorization", `Bearer ${t}`);
   }
-  const r = await fetch(`${API}${path}`, { ...options, headers: h });
+  let r: Response;
+  try {
+    r = await fetch(`${API}${path}`, { ...options, headers: h });
+  } catch (err) {
+    throw new Error("Unable to connect to server. Please check your connection.");
+  }
   const d = await r.json().catch(() => ({}));
   if (r.status === 401 && typeof window !== "undefined") {
     localStorage.removeItem("sp_token");
     localStorage.removeItem("sp_user");
   }
-  if (!r.ok) throw new Error(d.detail ?? "Request failed");
+  if (!r.ok) {
+    const detailMsg = typeof d.detail === "string" ? d.detail : d.message;
+    throw new Error(detailMsg || `Request failed with status ${r.status}`);
+  }
   return d as T;
 }
 
@@ -56,7 +63,7 @@ export async function getProjects() {
   return request<Project[]>("/api/projects");
 }
 
-export async function createProject(p: { name: string; description: string; research_question: string }) {
+export async function createProject(p: { name: string; description: string }) {
   return request<Project>("/api/projects", { method: "POST", body: JSON.stringify(p) });
 }
 
@@ -70,6 +77,7 @@ export type Paper = {
   file_hash: string;
   file_path: string;
   status: string;
+  display_name: string;
   title: string;
   authors: string;
   year: number;
@@ -114,11 +122,74 @@ export type AskResponse = {
   sources: SourceItem[];
 };
 
-export async function askQuestion(projectId: string, query: string): Promise<AskResponse> {
+export async function askQuestion(projectId: string, query: string, mode: "deep" | "turbo" = "turbo"): Promise<AskResponse> {
   return request<AskResponse>(`/api/projects/${projectId}/ask`, {
     method: "POST",
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, mode }),
   });
+}
+
+export async function askQuestionStream(
+  projectId: string,
+  query: string,
+  mode: "deep" | "turbo" = "turbo",
+  onToken: (fullText: string) => void,
+  onSources: (sources: SourceItem[]) => void
+): Promise<string> {
+  const h = new Headers({ "Content-Type": "application/json" });
+  const t = typeof window !== "undefined" ? localStorage.getItem("sp_token") : null;
+  if (t) h.set("Authorization", `Bearer ${t}`);
+
+  try {
+    const res = await fetch(`${API}/api/projects/${projectId}/ask/stream`, {
+      method: "POST",
+      headers: h,
+      body: JSON.stringify({ query, mode }),
+    });
+
+    if (!res.ok || !res.body) {
+      const fallback = await askQuestion(projectId, query, mode);
+      if (fallback.sources) onSources(fallback.sources);
+      onToken(fallback.answer);
+      return fallback.answer;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let accumulatedText = "";
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          if (event.type === "sources" && event.sources) {
+            onSources(event.sources);
+          } else if (event.type === "token" && event.token) {
+            accumulatedText += event.token;
+            onToken(accumulatedText);
+          }
+        } catch {
+          // ignore partial json
+        }
+      }
+    }
+
+    return accumulatedText;
+  } catch {
+    const fallback = await askQuestion(projectId, query, mode);
+    if (fallback.sources) onSources(fallback.sources);
+    onToken(fallback.answer);
+    return fallback.answer;
+  }
 }
 
 export type Analytics = {
@@ -133,6 +204,23 @@ export type InsightTheme = {
   title: string;
   description: string;
   paper_ids: number[];
+  paper_titles?: string[];
+  category?: string;
+};
+
+export type StructuredGap = {
+  title: string;
+  severity: "Critical" | "High" | "Medium";
+  description: string;
+  opportunity: string;
+};
+
+export type MethodologyInsight = {
+  name: string;
+  category: string;
+  description: string;
+  papers: string[];
+  tradeoff?: string;
 };
 
 export type Insights = {
@@ -140,6 +228,10 @@ export type Insights = {
   core_themes: InsightTheme[];
   research_gaps: string[];
   methodologies: string[];
+  structured_gaps?: StructuredGap[];
+  methodology_insights?: MethodologyInsight[];
+  consensus_findings?: string[];
+  open_debates?: string[];
 };
 
 export type PriorityPaper = {
@@ -168,19 +260,40 @@ export type CitationNode = {
   authors: string;
   year?: number;
   status?: string;
+  doi?: string;
   x?: number;
   y?: number;
+  timeline_x?: number;
+  timeline_y?: number;
+  in_degree?: number;
+  out_degree?: number;
+  influence_score?: number;
+  cluster?: string;
+  key_role?: string;
 };
 
 export type CitationEdge = {
   source: number;
   target: number;
   label: string;
+  context?: string;
+};
+
+export type CitationSummary = {
+  total_citations: number;
+  seminal_paper_id?: number;
+  seminal_paper_title?: string;
+  newest_paper_title?: string;
+  avg_citations_per_paper: number;
+  network_density: number;
+  year_range: string;
+  clusters: string[];
 };
 
 export type Citations = {
   nodes: CitationNode[];
   edges: CitationEdge[];
+  summary?: CitationSummary;
 };
 
 export async function getAnalytics(projectId: string): Promise<Analytics> {
@@ -231,4 +344,20 @@ export async function downloadMarkdownReport(projectId: string) {
 
 export async function downloadBibTeX(projectId: string) {
   return downloadFile(`/api/projects/${projectId}/export/bibtex`, `ScholarPulse_Project_${projectId}_Citations.bib`);
+}
+
+export async function openPaperPdf(projectId: string | number, paperId: string | number) {
+  const h = new Headers();
+  if (typeof window !== "undefined") {
+    const t = localStorage.getItem("sp_token");
+    if (t) h.set("Authorization", `Bearer ${t}`);
+  }
+  const res = await fetch(`${API}/api/projects/${projectId}/papers/${paperId}/pdf`, { headers: h });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Failed to load PDF");
+  }
+  const blob = await res.blob();
+  const fileUrl = window.URL.createObjectURL(blob);
+  window.open(fileUrl, "_blank");
 }
